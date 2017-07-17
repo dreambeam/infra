@@ -1,0 +1,183 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# All Vagrant configuration is done below. The "2" in Vagrant.configure
+# configures the configuration version (we support older styles for
+# backwards compatibility). Please don't change it unless you know what
+# you're doing.
+
+require 'log4r/config'
+UI = Log4r::Logger.new("ubuntu-vagrant-cluser")
+UI.add Log4r::Outputter.stdout
+if ENV['VAGRANT_LOG'] && ENV['VAGRANT_LOG'] != ''
+  Log4r.define_levels(*Log4r::Log4rConfig::LogLevels)
+  level = Log4r.const_get(ENV['VAGRANT_LOG'].upcase)
+  UI.level = level
+end
+
+## User Config
+##############################################
+
+class UserConfig
+  attr_accessor :box
+  attr_accessor :box_url
+  attr_accessor :box_version
+  attr_accessor :machine_config_path
+  attr_accessor :config_path
+  attr_accessor :version
+  attr_accessor :generate_config_path
+  attr_accessor :install_method
+  attr_accessor :vagrant_mount_method
+  attr_accessor :java_enabled
+  attr_accessor :private_registry
+
+  def self.from_env
+    c = new
+    c.box_version          = ENV.fetch(env_var('box_version'), '~> 0.9.0')
+    c.machine_config_path  = ENV.fetch(env_var('machine_config_path'), 'VagrantConfig.yaml')
+    c.config_path          = ENV.fetch(env_var('config_path'), '')
+    c.version              = ENV.fetch(env_var('version'), '')
+    c.generate_config_path = ENV.fetch(env_var('generate_config_path'), '')
+    c.install_method       = ENV.fetch(env_var('install_method'), 'ssh_pull')
+    c.vagrant_mount_method = ENV.fetch(env_var('vagrant_mount_method'), 'virtualbox')
+    c.java_enabled         = (ENV.fetch(env_var('java_enabled'), 'false') == 'true')
+    c.private_registry     = (ENV.fetch(env_var('private_registry'), 'false') == 'true')
+    c
+  end
+
+  # resolve relative paths to be relative to the vagrant mount (allow remote urls)
+  def self.path_to_url(path)
+    %r{^\w*:\/\/} =~ path ? path : 'file:///vagrant/' + path
+  end
+
+  # convert field symbol to env var
+  def self.env_var(field)
+    "DCOS_#{field.to_s.upcase}"
+  end
+
+  # validate required fields and files
+  def validate
+    errors = []
+
+    # Validate required fields
+    required_fields = [
+      :box,
+      :box_url,
+      :box_version,
+      :machine_config_path,
+      :install_method,
+      :vagrant_mount_method
+    ]
+    required_fields.each do |field_name|
+      field_value = send(field_name.to_sym)
+      if field_value.nil? || field_value.empty?
+        errors << "Missing required attribute: #{field_name}"
+      end
+    end
+
+    raise ValidationError, errors unless errors.empty?
+
+    if @config_path.empty? && !@generate_config_path.empty?
+      errors << "Config path (#{UserConfig.env_var('config_path')}) must be specified when installer (#{UserConfig.env_var('generate_config_path')}) is specified."
+    end
+
+    # Validate required files
+    required_files = []
+    required_files << :machine_config_path if !@machine_config_path.empty?
+    required_files << :config_path if !@config_path.empty?
+    required_files << :generate_config_path if !@config_path.empty?
+
+    required_files.each do |field_name|
+      file_path = send(field_name.to_sym)
+      field_env_var = UserConfig.env_var(field_name)
+      if file_path.empty?
+        errors << "File path not specified: '#{field_env_var}'. Ensure that the file path is configured (export #{field_env_var}=<value>)."
+        next
+      end
+      if file_path.start_with?(File::SEPARATOR)
+        errors << "File path not relative: '#{file_path}'. Ensure that the path is relative to the repo directory, which is mounted into the VMs (export #{field_env_var}=<value>)."
+        next
+      end
+      unless File.file?(file_path)
+        errors << "File not found: '#{file_path}'. Ensure that the file exists or reconfigure its location (export #{field_env_var}=<value>)."
+      end
+    end
+
+    raise ValidationError, errors unless errors.empty?
+  end
+
+  # create environment for provisioning scripts
+  def provision_env(machine_type)
+    env = {
+      'DCOS_CONFIG_PATH' => UserConfig.path_to_url(@config_path),
+      'DCOS_GENERATE_CONFIG_PATH' => UserConfig.path_to_url(@generate_config_path),
+      'DCOS_JAVA_ENABLED' => @java_enabled ? 'true' : 'false',
+      'DCOS_PRIVATE_REGISTRY' => @private_registry ? 'true' : 'false'
+    }
+    if machine_type['memory-reserved']
+      env['DCOS_TASK_MEMORY'] = machine_type['memory'] - machine_type['memory-reserved']
+    end
+    env
+  end
+end
+
+
+# path to the provision shell scripts
+def provision_script_path(type)
+  "./provision/#{type}.sh"
+end
+
+
+## VM Creation & Provisioning
+##############################################
+
+Vagrant.configure("2") do |config|
+
+  # configure vagrant-hostmanager plugin
+  config.hostmanager.enabled = true
+  config.hostmanager.manage_host = true
+  config.hostmanager.ignore_private_ip = false
+
+  # Avoid random ssh key for demo purposes
+  config.ssh.insert_key = false
+
+  # Vagrant Plugin Configuration: vagrant-vbguest
+  if Vagrant.has_plugin?('vagrant-vbguest')
+    # enable auto update guest additions
+    config.vbguest.auto_update = true
+  end
+
+  config.vm.define "web" do |web|
+    web.vm.box = "geerlingguy/ubuntu1604"
+    web.vm.hostname = 'web' 
+    web.vm.box_url =  "geerlingguy/ubuntu1604"
+
+  # Create a private network, which allows host-only access to the machine
+  # using a specific IP.
+  # config.vm.network "private_network", ip: "192.168.33.10"
+    web.vm.network :private_network, ip: "192.168.56.101"
+
+  # Example for VirtualBox:
+  #
+    web.vm.provider :virtualbox do |v|
+      v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      v.customize ["modifyvm", :id, "--memory", 1024]
+      v.customize ["modifyvm", :id, "--name", "web"]
+    end
+  end
+
+  config.vm.define "db" do |db|
+    db.vm.box = "geerlingguy/ubuntu1604"
+    db.vm.hostname = 'db'
+    db.vm.box_url = "geerlingguy/ubuntu1604"
+
+    db.vm.network :private_network, ip: "192.168.56.102"
+
+    db.vm.provider :virtualbox do |v|
+      v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      v.customize ["modifyvm", :id, "--memory", 512]
+      v.customize ["modifyvm", :id, "--name", "db"]
+    end
+  end
+
+end
