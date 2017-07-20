@@ -1,0 +1,38 @@
+---
+- name: Check CentOS kernel version
+  shell: uname -r | egrep '^[0-9]*\.[0-9]*' -o
+  register: kernel_shell_output
+  
+- debug: msg="{{ kernel_shell_output.stdout}}"
+
+- name: Add cstate and reboot bios if kernel is 4.4
+  shell: echo "Stop when kernel is 4.4"
+  when: kernel_shell_output.stdout == "4.4"
+
+#- name: Enable ELRepo repository on CentOS 7
+#  command: rpm --import https://www.elrepo.org/RPM-GPG-KEY-elrepo.org
+
+- name: Enable and Add ELRepo repository
+  yum_repository:
+    name: elrepo
+    description: ELRepo yum repo
+    baseurl: http://www.elrepo.org/elrepo-release-7.0-2.el7.elrepo.noarch.rpm
+    gpgkey: https://www.elrepo.org/RPM-GPG-KEY-elrepo.org
+
+#- name: Download rpm
+#  command: rpm -Uvh http://www.elrepo.org/elrepo-release-7.0-2.el7.elrepo.noarch.rpm
+
+- name: List available kernel related packages
+  yum: disablerepo="*" enablerepo="elrepo-kernel" list available | grep "kernel-lt"
+
+- name: Install long term stable kernel
+  yum: 
+    name: kernel-lt
+    enablerepo: elrepo-kernel
+    state: present
+
+#- name: Reboot the machine to apply the latest kernel
+#  command: reboot
+
+#- name: Check the kernel version
+#  command: uname -sr

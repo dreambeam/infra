@@ -1,0 +1,29 @@
+---
+- hosts: dcos-cluster
+  become: yes
+  roles:
+    - dcos-cluster
+  tags:
+    - kernel-upgrade
+    - dcos-cluster
+
+- hosts: mesos-master
+  become: yes
+  roles:
+    - masters
+  tags:
+    - masters
+
+- hosts: mesos-agent
+  become: yes
+  roles:
+    - private-agents
+  tags:
+    - private-agents
+
+- hosts: mesos-public-agent
+  become: yes
+  roles:
+    - public-agents
+  tags:
+    - public-agents

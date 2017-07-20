@@ -1,0 +1,12 @@
+[submodule "roles/kernel-upgrade"]
+	path = roles/kernel-upgrade
+	url = http://nas.ajway.kr:30000/erp-ta/kernel-playbook/tree/master/kernel-update/roles/kernel-upgrade
+[submodule "roles/masters"]
+	path = roles/masters
+	url = http://nas.ajway.kr:30000/erp-ta/kernel-playbook/tree/master/kernel-update/roles/masters
+[submodule "roles/private-agents"]
+	path = roles/private-agents
+	url = http://nas.ajway.kr:30000/erp-ta/kernel-playbook/tree/master/kernel-update/roles/private-agents
+[submodule "roles/public-agents"]
+	path = roles/public-agents
+	url = http://nas.ajway.kr:30000/erp-ta/kernel-playbook/tree/master/kernel-update/roles/public-agents
